@@ -1,0 +1,7 @@
+interface:
+  display_name: "绕弯说话术"
+  short_description: "用双重否定把话绕起来，或把绕晕的话翻成人话"
+  default_prompt: "使用 $double-negative-speech 帮我完成……"
+
+policy:
+  allow_implicit_invocation: true
