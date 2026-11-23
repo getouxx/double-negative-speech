@@ -14,6 +14,7 @@ Python 调用：
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -37,6 +38,32 @@ TEMPLATES = [
     ("不是不该 X，而是尚未 Y", "该 X，但还没 Y"),
 ]
 
+# 语用层风险：极性在规则层唯一，但读者可能按另一种语气去读。
+# 每条 = (类型, 名称, 正则, 为什么有风险, 怎么补)
+PRAGMATIC_CHECKS = [
+    (
+        "soft-refusal",
+        "委婉软化：可能被读成拒绝",
+        re.compile(r"(不是不(能|可|会|行|让|给)|并非不(能|可|会|行)|不是没(办法|可能|道理|余地))"),
+        "表态场景里「不是不能」常是「不能」的软化说法，读者会当成留面子的拒绝，而不是真的可以",
+        "把态度落在明面上，如「可以谈，但有前提」；不要只靠双重否定暗示",
+    ),
+    (
+        "sarcasm",
+        "反讽：字面与态度可能相反",
+        re.compile(r"(可真是|真是够|好一个|算你|真有你的|果然)"),
+        "带「可真是」「好一个」的否定句在口语里常是反讽，字面肯定、实际否定",
+        "补一个语境词或直接说结论，别让读者猜这是夸还是损",
+    ),
+    (
+        "rhetorical",
+        "反问：字面极性会被翻转",
+        re.compile(r"(难道|岂不|岂能|谁说|何尝|莫非)"),
+        "反问句的实际断言与字面极性相反：字面「不」，意思是「就是」",
+        "要么明确按反问写并给答案，要么改成陈述句，不留两种读法",
+    ),
+]
+
 
 def analyze(sentence: str) -> dict:
     """返回结构化解码结果（极性、作用域、歧义、风险）。"""
@@ -55,17 +82,61 @@ def compare(a: str, b: str) -> dict:
     }
 
 
+def pragmatic_risks(sentence: str) -> list[dict]:
+    """语用层提示：规则层唯一，但语气/态度可能被读偏。
+
+    只报提示，不判对错——语用要靠语境定，脚本做不到，也不该假装能做到。
+    """
+    hits: list[dict] = []
+    for kind, name, pattern, why, fix in PRAGMATIC_CHECKS:
+        m = pattern.search(sentence)
+        if m:
+            hits.append({
+                "type": kind,
+                "name": name,
+                "evidence": m.group(0),
+                "why": why,
+                "fix": fix,
+                "layer": "pragmatic",
+            })
+    # 反讽只在句子里真的带否定词时才成立，避免把「他真是够努力」误报
+    if any(h["type"] == "sarcasm" for h in hits):
+        if not nc.analyze(sentence).negations:
+            hits = [h for h in hits if h["type"] != "sarcasm"]
+    # 「难道」本身不是否定，但配上句末语气词才构成完整反问，单独出现只算弱提示
+    return hits
+
+
 def check(sentence: str) -> dict:
-    """生成结果的歧义自检：规则层唯一 ≠ 语用层唯一。"""
+    """生成结果的歧义自检：规则层唯一 ≠ 语用层唯一。
+
+    两层分开报：
+      risks     —— 规则层歧义（否定计数/作用域/量词/特殊形式），非空即不能作为唯一解交付
+      pragmatic —— 语用层提示（委婉软化/反讽/反问/弱断言），不强制改写，但要确认语境兜得住
+    """
     rep = nc.analyze(sentence)
-    risky = rep.ambiguities + rep.warnings
+    risks = list(rep.ambiguities)
+    warnings = list(rep.warnings)
+    pragmatic = pragmatic_risks(sentence)
+    passed = not risks and not pragmatic
+
+    if risks:
+        note = f"规则层已标出 {len(risks)} 处歧义：此句不能作为唯一解交付，需改写或补充语境"
+    elif pragmatic:
+        note = (f"规则层唯一（{rep.polarity}），但语用层有 {len(pragmatic)} 处提示："
+                "不改也能用，但要确认上下文能兜住这句的语气")
+    else:
+        note = f"规则层无歧义（{rep.polarity}），语用层未命中常见风险模式"
+
     return {
         "text": sentence,
         "polarity": rep.polarity,
-        "pass": not rep.ambiguities,
-        "risks": risky,
-        "note": "规则层无歧义" if not rep.ambiguities
-        else "规则层已标出歧义：此句不能作为唯一解交付，需改写或补充语境",
+        "weight": rep.total_weight,
+        "pass": passed,
+        "risks": risks,
+        "warnings": warnings,
+        "pragmatic": pragmatic,
+        "note": note,
     }
 
 
@@ -80,7 +151,8 @@ def main(argv: list[str]) -> int:
     elif cmd == "compare" and len(rest) >= 2:
         print(json.dumps(compare(rest[0], rest[1]), ensure_ascii=False, indent=2))
     elif cmd == "check" and rest:
-        print(json.dumps(check(" ".join(rest)), ensure_ascii=False, indent=2))
+        result = check(" ".join(rest))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif cmd == "templates":
         for pat, meaning in TEMPLATES:
             print(f"{pat}\t→ {meaning}")
