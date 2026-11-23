@@ -30,7 +30,10 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 3. **套句式**，从 `references/patterns.md` 取模板，嵌套不超过三层。
 4. **折叠验证**：把自己生成的句子按 B 路径解一遍，结果必须与第 1 步的原句**完全一致**。不一致就是写错了，不是“差不多”。
 5. **交付**：只给句子，用户没要解析就不附答案。出题、做测试时**必须同时给出正确答案，以及错误选项各自错在哪**。
-6. **歧义自检**：跑 `python3 scripts/wanhua.py check "<句子>"`。`pass` 为 false 或 `risks` 非空，说明规则层已看出歧义，必须改写或补语境，不能交付。
+6. **歧义自检**：跑 `python3 scripts/wanhua.py check "<句子>"`。`pass` 为 false 时看两层：
+   - `risks` 非空＝规则层歧义（计数/作用域/量词/特殊形式），必须改写，不能交付。
+   - `pragmatic` 非空＝规则层唯一但语用有坑（委婉软化「不是不能」、反讽「可真是」、反问「难道」），可按 `fix` 把态度写明，或确认上下文兜得住再用。
+   两层都空才是"规则与语用都干净"。
 
 ## B. 解码路径
 
@@ -60,5 +63,6 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 - 真实翻车案例，按失败类型归档：`references/failure_cases.md`
 - 否定分析（极性/作用域/歧义）：`scripts/negation_count.py`
 - 折叠验证与自检：`scripts/wanhua.py`（`compare` / `check` / `templates`）
-- 回归用例：`tests/test_negation_count.py`，改规则前后各跑一次
+- 回归用例：`tests/test_negation_count.py`（规则层）与 `tests/test_wanhua.py`（check 的规则层/语用层），改规则前后各跑一次
+- 每条失败案例带 `FC-xx` 编号，并绑定测试方法名，见 `references/failure_cases.md` 末尾对照表
 - 安装到各平台：`install.sh`
