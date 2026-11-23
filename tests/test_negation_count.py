@@ -181,5 +181,36 @@ class InterfaceTests(unittest.TestCase):
         self.assertIn("差点没", buf.getvalue())
 
 
+class FailureCaseTests(unittest.TestCase):
+    """failure_cases.md 里已修正的案例，在这里落成回归用例。"""
+
+    def test_fc04_four_layers_flagged(self):
+        """FC-04：四层否定必须报警，不能假装可解。"""
+        rep = nc.analyze("未必不是不可能不记")
+        self.assertTrue(any("超过 3 层" in w for w in rep.warnings))
+
+    def test_fc09_wanquan_flagged(self):
+        """FC-09：『不能完全不同意』的『完全』要按全称词降级提示。"""
+        rep = nc.analyze("不能完全不同意")
+        self.assertTrue(any("特称否定" in a for a in rep.ambiguities))
+
+    def test_fc12_weibi_combo(self):
+        """FC-12：『未必』+『不』两层折叠后为肯定，漏掉『未必』就判反。"""
+        rep = nc.analyze("他未必不知道")
+        self.assertEqual(rep.total_weight, 2)
+        self.assertEqual(rep.polarity, "肯定")
+
+    def test_fc15_nanmianbu_flagged(self):
+        """FC-15：『难免不』属歧义高频区，只提示不硬判。"""
+        rep = nc.analyze("难免不被人说")
+        self.assertTrue(any("难免不" in a for a in rep.ambiguities))
+
+    def test_fc16_triple_scope_flagged(self):
+        """FC-16：三层否定且作用域交叉，必须报作用域分歧。"""
+        rep = nc.analyze("不是不想不再这么下去")
+        self.assertEqual(rep.total_weight, 3)
+        self.assertTrue(any("作用域可能归属不同" in a for a in rep.ambiguities))
+
+
 if __name__ == "__main__":
     unittest.main()
