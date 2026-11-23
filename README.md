@@ -38,13 +38,50 @@ $ python3 scripts/wanhua.py check "要说再这么下去还算在做事，恐怕
 {
   "text": "要说再这么下去还算在做事，恐怕没几个人不觉得勉强",
   "polarity": "肯定",
+  "weight": 2,
   "pass": true,
   "risks": [],
-  "note": "规则层无歧义"
+  "warnings": [],
+  "pragmatic": [],
+  "note": "规则层无歧义（肯定），语用层未命中常见风险模式"
 }
 ```
 
-换成故意有坑的句子，检查会直接拦下来：
+规则层通过不等于能交付。换成一句"极性唯一、但一读就像婉拒"的句子，`check` 会给出语用层提示：
+
+```bash
+$ python3 scripts/wanhua.py check "这件事，不是不能商量。"
+{
+  "text": "这件事，不是不能商量。",
+  "polarity": "肯定",
+  "pass": false,
+  "risks": [],
+  "pragmatic": [
+    {
+      "type": "soft-refusal",
+      "name": "委婉软化：可能被读成拒绝",
+      "evidence": "不是不能",
+      "why": "表态场景里「不是不能」常是「不能」的软化说法，读者会当成留面子的拒绝，而不是真的可以",
+      "fix": "把态度落在明面上，如「可以谈，但有前提」；不要只靠双重否定暗示",
+      "layer": "pragmatic"
+    }
+  ],
+  "note": "规则层唯一（肯定），但语用层有 1 处提示：不改也能用，但要确认上下文能兜住这句的语气"
+}
+```
+
+读法：`risks` 为空说明否定计数、作用域、量词都没问题；`pass: false` 是因为 `pragmatic` 里有一条——这句在规则上是"可以"，在语用上容易被当成"不一定可以"。这类句子**不必废弃**，但要确认上下文能兜住，或按 `fix` 把态度写明白。
+
+反问同理：
+
+```bash
+$ python3 scripts/wanhua.py check "难道这不叫负责吗？"
+# "polarity": "否定"
+# "pragmatic": [{"type": "rhetorical", "evidence": "难道", ...}]
+# "note": "规则层唯一（否定），但语用层有 1 处提示……"
+```
+
+换成故意有坑的句子，规则层就拦下来：
 
 ```bash
 $ python3 scripts/negation_count.py "不想不安装在脑子里的知识"
@@ -95,7 +132,7 @@ $ python3 scripts/negation_count.py "不想不安装在脑子里的知识"
 2. **选绕度**：轻 / 中 / 重，默认中绕，出题用重绕。
 3. **套句式**，取自 `references/patterns.md`，嵌套不超过三层。
 4. **折叠验证**：按解码路径回译一遍，必须与原句完全一致。
-5. **歧义自检**：跑 `wanhua.py check`；规则层通过不代表语用层唯一，`risks` 非空就要改写或补语境。
+5. **歧义自检**：跑 `wanhua.py check`。`risks` 非空＝规则层有歧义，必须改写；`pragmatic` 非空＝规则层唯一但语用有坑（委婉软化/反讽/反问），要么补语境，要么按 `fix` 改。
 
 ## 解码路径（七步）
 
@@ -110,7 +147,7 @@ $ python3 scripts/negation_count.py "不想不安装在脑子里的知识"
 | `python3 scripts/negation_count.py --ambiguity "句子"` | 只看歧义与风险 |
 | `python3 scripts/wanhua.py analyze "句子"` | 纯函数式分析，返回 dict |
 | `python3 scripts/wanhua.py compare "绕句" "原句"` | 折叠验证：极性是否一致 |
-| `python3 scripts/wanhua.py check "句子"` | 歧义自检（含语用风险提示） |
+| `python3 scripts/wanhua.py check "句子"` | 歧义自检：规则层 `risks` + 语用层 `pragmatic`，`pass` 需两者皆空 |
 | `python3 scripts/wanhua.py templates` | 列出可用句式与等价意思 |
 
 也能当库用，脱离 Agent 框架：
@@ -129,18 +166,25 @@ compare("不是不该改", "该改")["same_polarity"]  # True
 python3 -m unittest discover -s tests -v
 ```
 
-27 条用例覆盖：极性奇偶、多字构式权重、词汇化否定、歧义结构（差点没/好不）、量词降级（含"认真一点"不该误报的反例）、作用域边界、假阳性（非常/别人/不管）、CLI 契约。改规则前先跑基线，改完再跑，红一条就说明行为被改坏了。
+43 条用例，分两个文件：
+
+- `tests/test_negation_count.py`（32 条）：极性奇偶、多字构式权重、词汇化否定、歧义结构（差点没/好不）、量词降级（含"认真一点"不该误报的反例）、作用域边界、假阳性（非常/别人/不管）、CLI 契约。其中 `FailureCaseTests` 直接对应 `failure_cases.md` 的 FC-04、FC-09、FC-12、FC-15、FC-16。
+- `tests/test_wanhua.py`（11 条）：`check` 的规则层/语用层分离、委婉软化的正例与反例（"不是不该认真一点"不许误报）、反讽需带否定词才触发、反问提示、`compare` 折叠验证、JSON 字段契约。
+
+改规则前先跑基线，改完再跑，红一条就说明行为被改坏了。
 
 ## 安装
 
 ```bash
-./install.sh                 # 复制到已检测到的各平台 Skill 目录
+./install.sh                 # 复制到"已存在"的各平台 Skill 目录，不会新建目录
 ./install.sh --link          # 软链接，改仓库即生效
-./install.sh --path ~/skills # 只装到指定位置
+./install.sh --path ~/skills # 只装到指定位置，目录不存在会自动创建
 ./install.sh --dry-run       # 只打印计划，不落盘
 ```
 
 默认候选目录：豆包 `.user_skills`、Claude `~/.claude/skills`、Codex `~/.codex/skills`、`~/.agents/skills`，均可用环境变量（`DOUBAO_SKILLS` 等）覆盖。已存在同名目录时跳过，`--force` 覆盖。
+
+**一个候选目录都不存在时**（新机器、没装过任何 Agent 平台）：脚本不装任何东西，打印检查过的四段路径，以退出码 `1` 结束，并提示两条出路——`./install.sh --path ~/skills`，或 `DOUBAO_SKILLS=/your/skills ./install.sh`。它不会偷偷 `mkdir` 出一堆空目录。
 
 ## 平台适配
 
@@ -166,7 +210,9 @@ policy:
 
 ## 失败案例库
 
-`references/failure_cases.md` 按失败类型归档真实翻车案例：作用域误判、漏数否定、构式拆分错、量词降级、词汇化漏计、特殊否定歧义、层级过深、词义绕冒充逻辑绕。每条都有"原句 / 本意 / 失败原因 / 修正"，同类累计三条就该改规则，而不是继续攒例句。
+`references/failure_cases.md` 按失败类型归档真实翻车案例：作用域误判、漏数否定、构式拆分错、量词降级、词汇化漏计、特殊否定歧义、层级过深、词义绕冒充逻辑绕。每条带 `FC-xx` 编号、"原句 / 本意 / 失败原因 / 修正 / **回归用例**"。
+
+回归用例列是硬要求：规则能判的必须写成测试方法名（如 FC-04 → `test_fc04_four_layers_flagged`），只能靠人读语气的写 `manual:FC-xx` 并注朋原因。文末有一张"案例 ↔ 测试对照"表，改规则时按图索驥。同类累计三条就该改规则，而不是继续攒例句。
 
 ## 贡献
 
