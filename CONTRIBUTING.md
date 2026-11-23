@@ -24,10 +24,15 @@
 打开 `references/failure_cases.md`，找到对应类型（作用域误判 / 漏数否定 / 构式拆分错 / 量词降级 / 词汇化漏计 / 特殊否定歧义 / 层级过深 / 词义绕冒充逻辑绕），照着表格追加一行：
 
 ```markdown
-| 原句 | 本意 | 失败原因 | 修正 |
+| 编号 | 原句 | 本意 | 失败原因 | 修正 | 回归用例 |
 ```
 
 没有合适的类型就先新增一类，并在标题里给出英文标签，例如 `## 类型九：回声否定（echo-neg）`。
+
+两条硬要求：
+
+- **编号**：顺延 `FC-xx`，不要复用别人的编号。
+- **回归用例**：规则层能判的，同一次 PR 里补测试方法名（如 `test_fc04_four_layers_flagged`）；只能靠人读语气的，写 `manual:FC-xx` 并在"失败原因"列说明为什么脚本判不了。docs-only 的案例只改文档、不补测试，PR 说明里要讲清。
 
 ## 三、改进脚本
 
@@ -41,8 +46,8 @@ python3 -m unittest discover -s tests -v   # 改之后再跑
 
 规则改动必须同时：
 
-1. 补一条回归用例到 `tests/test_negation_count.py`，用例名写清它防的是什么（如 `test_quantifier_trap_flagged`）。
-2. 如果改变了极性判定，在 `references/failure_cases.md` 里回填被修掉的案例。
+1. 补一条回归用例：规则层（极性/作用域/量词）进 `tests/test_negation_count.py`，`check` 的判定与语用提示进 `tests/test_wanhua.py`，用例名写清它防的是什么（如 `test_quantifier_trap_flagged`、`test_fc_p2_soft_refusal`）。
+2. 如果改变了极性判定，在 `references/failure_cases.md` 里回填被修掉的案例，并把"回归用例"列填上。
 3. 保持 `--json` 输出字段不变；新增字段可以，删改字段算破坏性变更。
 
 新增词条时注意三件事：
