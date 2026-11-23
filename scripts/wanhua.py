@@ -103,7 +103,6 @@ def pragmatic_risks(sentence: str) -> list[dict]:
     if any(h["type"] == "sarcasm" for h in hits):
         if not nc.analyze(sentence).negations:
             hits = [h for h in hits if h["type"] != "sarcasm"]
-    # 「难道」本身不是否定，但配上句末语气词才构成完整反问，单独出现只算弱提示
     return hits
 
 
@@ -112,7 +111,7 @@ def check(sentence: str) -> dict:
 
     两层分开报：
       risks     —— 规则层歧义（否定计数/作用域/量词/特殊形式），非空即不能作为唯一解交付
-      pragmatic —— 语用层提示（委婉软化/反讽/反问/弱断言），不强制改写，但要确认语境兜得住
+      pragmatic —— 语用层提示（委婉软化/反讽/反问），不强制改写，但要确认语境兜得住
     """
     rep = nc.analyze(sentence)
     risks = list(rep.ambiguities)
