@@ -35,7 +35,7 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 | --- | --- | --- |
 | `status` | `ok` / `low_confidence` / `ambiguous` / `unknown` / `error` | 决定能不能直接交付 |
 | `polarity` | `肯定` / `否定` / `null` | 结论；`unknown`、`error` 时为 `null` |
-| `confidence` | 0~1 | 只是规则置信度，不是语言正确率 |
+| `confidence` | 0~1 / `null` | 只是规则置信度，不是语言正确率；`manual` 模式必须为 `null` |
 | `rules` | `[{id, note}]` | 歧义来自哪条规则，可原样转述给用户 |
 | `scope` | `[{token, weight, kind, scope}]` | 每个否定词管到哪一小句 |
 | `pragmatic_hint` | `{heuristic:true, coverage, items, affects_polarity:false}` | **只是提示**，永不改 `polarity` |
@@ -72,6 +72,20 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 - 规则判不了就报 `ambiguous`，并列两种读法，不硬选一个当答案。
 - 语用层只覆盖 **委婉软化 / 反讽 / 反问** 三类，不覆盖语气强度、礼貌层级、方言差异；它只出提示，不参与极性计算。
 - 脚本只用标准库，Python ≥ 3.8；崩溃或依赖缺失时退出码非 0，宿主应视为"没得出结论"。
+
+## 没有 Python 环境怎么办
+
+脚本是加速器，不是前提。先试一次 `python3 scripts/wanhua.py solve`，失败再降级，别跳过机器校验。
+
+降级时按 `references/manual-mode.md` 的规则表人工执行，输出同一形状，但三处必须改：
+
+- `mode` = `"manual"`（不是 `decode`）；
+- `confidence` = `null`，**禁止编一个 0.95 出来**；
+- `explain` 里写明"manual 模式：按规则表人工执行，未跑脚本校验"。
+
+`status` 只用 `ok / low_confidence / ambiguous / unknown`（人工不会"崩溃"，不产 `error`）；`rules` 仍用同一套 `R-*` 编号；判不准一律 `ambiguous`，不赌。
+
+manual 结果不算"已验证"：对外文本要复核，日志里保留 `mode: manual`，别抹成 `decode`。
 
 ## A. 生成路径
 
@@ -112,7 +126,7 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 
 - 当前 **v1.2.0**，契约在 `references/contract.md` 冻结；变更记录见 `CHANGELOG.md`。
 - 新增字段兼容；删字段、改 `status` 取值、改退出码语义算破坏性变更，必须升版本。
-- 宿主只依赖三件事：SKILL.md 的 `name`（slug）、`scripts/` 的 CLI 契约、纯标准库的 Python 3.8+ 环境。
+- 宿主只依赖三件事：SKILL.md 的 `name`（slug）、`scripts/` 的 CLI 契约、纯标准库的 Python 3.8+ 环境；没有 Python 时走 `manual` 降级（见上节），不假装跑过脚本。
 
 ## 资源（按需加载）
 
@@ -120,6 +134,7 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 - 句式模板、适用条件与扩展方式：`references/patterns.md`
 - 成对例句、正例反例与边界：`references/examples.md`
 - 真实翻车案例（带 `FC-xx` 与回归用例）：`references/failure_cases.md`
+- 没有 Python 时的降级执行卡：`references/manual-mode.md`
 - 分析器（极性/作用域/歧义/置信度）：`scripts/negation_count.py`
 - 契约层 CLI（`solve` / `check` / `compare` / `templates`）：`scripts/wanhua.py`
 - 标注集评估：`scripts/evaluate.py` + `tests/labeled_cases.json`

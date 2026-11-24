@@ -251,6 +251,22 @@ python3 -m unittest discover -s tests -v
 
 **一个候选目录都不存在时**（新机器、没装过任何 Agent 平台）：脚本不装任何东西，打印检查过的四段路径，以退出码 `1` 结束，并提示两条出路——`./install.sh --path ~/skills`，或 `DOUBAO_SKILLS=/your/skills ./install.sh`。它不会偷偷 `mkdir` 出一堆空目录。
 
+## 宿主没有 Python 怎么办
+
+脚本是加速器，不是前提。这种情况下不要"降级成随便猜"，按 `references/manual-mode.md` 用同一套规则表人工执行：
+
+| 项 | 有 Python（`decode`） | 没 Python（`manual`） |
+| --- | --- | --- |
+| `mode` | `decode` | `manual` |
+| `confidence` | 0.95 / 0.7 / 0.5 / 0.3 / 0.0 | **`null`**，禁止编数字 |
+| `status` | 五态（含 `error`） | 四态，不产 `error` |
+| 可解释性 | `rules` 带规则编号 | 同样带 `R-*` 编号 |
+| 可信度 | 规则层已核验 | 未跑脚本校验，对外文本要复核 |
+
+manual 的六步：切小句 → 先长后短圈否定（长构式权重 2）→ 折奇偶 → 查作用域（心理动词隔开即 `R-SCOPE`）→ 查量词（否定后 8 字内的全称词）→ 判层数与冲突（≥4 层、≥3 条规则即降级）。判不准一律 `ambiguous`，并列两种读法。
+
+也可以换一台有 Python 的机器跑一次 `solve`，把 JSON 粘回来——仓库不另出"零依赖单文件 Web 版"，两份规则并行必然漂移。
+
 ## 安全与误用边界
 
 这个 Skill 能把"拒绝"包装成"不是不能"，所以必须写清红线：

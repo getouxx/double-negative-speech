@@ -50,11 +50,11 @@
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `skill` / `version` | string | 固定 slug 与版本号；宿主可据此判断契约是否变化 |
-| `mode` | `decode` | 当前只有解码；生成路径靠 SKILL.md 的流程，不伪装成脚本能力 |
+| `mode` | `decode` / `manual` | 脚本只输出 `decode`；`manual` 由宿主在没有 Python 环境时自行填写，见下节 |
 | `input_text` | string | 原样回显（已 strip），便于日志对齐 |
 | `status` | enum | `ok` / `low_confidence` / `ambiguous` / `unknown` / `error`，见下 |
 | `polarity` | `"肯定"` / `"否定"` / `null` | 规则层折叠结果；`unknown` 与 `error` 时为 `null` |
-| `confidence` | 0~1 | 规则置信度，不是语言正确率；取值 0.95 / 0.7 / 0.5 / 0.3 / 0.0 |
+| `confidence` | 0~1 / `null` | 规则置信度，不是语言正确率；脚本取值 0.95 / 0.7 / 0.5 / 0.3 / 0.0，`manual` 模式必须是 `null` |
 | `rules` | array | 触发的规则，元素 `{id, note}`，`id` 形如 `R-QUANT`，用于可解释展示 |
 | `scope` | array | 每个否定词的作用域浅层边界 `{token, weight, kind, scope}` |
 | `pragmatic_hint` | object / null | **启发式**语用提示，明确标 `heuristic: true`、`affects_polarity: false` |
@@ -102,6 +102,16 @@
 - **中英混排 / 标点异常 / Emoji**：不报错，非中文字符按普通字符跳过。
 - **语用层**：只给提示，永不改 `polarity`，`affects_polarity:false` 是硬约定。
 - **脚本崩溃**：退出码非 0 且 `stderr` 有信息；宿主应视为"未得出结论"，而不是"否定"。
+
+## 无 Python 环境：`manual` 降级
+
+脚本不可用时（无 `python3`、沙箱禁执行、用户要求不跑脚本），宿主按 `references/manual-mode.md` 的规则表人工执行，输出同一形状但有三处差异：
+
+- `mode` = `"manual"`；`confidence` = `null`（禁止编造数值）。
+- `status` 只用 `ok` / `low_confidence` / `ambiguous` / `unknown`，不产 `error`。
+- `explain` 必须带"manual 模式：按规则表人工执行，未跑脚本校验"。
+
+这是**新增取值**的兼容变更：脚本行为不变，契约版本仍为 v1.2.0，宿主按 `mode` 字段决定是否采信。
 
 ## 兼容性
 
