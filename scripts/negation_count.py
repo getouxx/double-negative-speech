@@ -19,6 +19,9 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+__version__ = "1.2.0"
+MAX_INPUT_CHARS = 200
+
 # ---------------------------------------------------------------- 词表
 # (表面形式, 否定权重, 类型, 说明)
 # 权重 = 该形式内含的否定次数。长构式先匹配，避免「没有理由不」被拆成「没有」+「不」只记一票。
@@ -108,6 +111,10 @@ class Report:
     clauses: list[str] = field(default_factory=list)
     ambiguities: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    status: str = "ok"          # ok | low_confidence | ambiguous | unknown | error
+    confidence: float = 0.0     # 规则置信度 0~1，歧义越多越低
+    rule_ids: list[str] = field(default_factory=list)
+    skill_version: str = __version__
 
 
 def split_clauses(text: str) -> list[tuple[int, int, str]]:
@@ -179,9 +186,9 @@ def analyze(text: str) -> Report:
     # 歧义与风险
     for n in rep.negations:
         if n.kind == "ambiguous":
-            rep.ambiguities.append(f"「{n.token}」：{n.note}")
+            rep.ambiguities.append(f"[R-SPECIAL] 「{n.token}」：{n.note}")
         elif "歧义" in n.note:
-            rep.ambiguities.append(f"「{n.token}」：{n.note}")
+            rep.ambiguities.append(f"[R-LEXICAL] 「{n.token}」：{n.note}")
 
     for n in rep.negations:
         if n.kind not in ("basic", "construct"):
@@ -192,7 +199,7 @@ def analyze(text: str) -> Report:
             found = "一点…都/也"
         if found:
             rep.ambiguities.append(
-                f"「{n.token}」后接全称词「{found}」，可能降成特称否定："
+                f"[R-QUANT] 「{n.token}」后接全称词「{found}」，可能降成特称否定："
                 f"「{n.scope}」需确认是「全否」还是「部分否」"
             )
 
@@ -203,18 +210,40 @@ def analyze(text: str) -> Report:
             between = text[a.end:b.start]
             if any(s in between for s in SCOPE_SPLITTERS):
                 rep.ambiguities.append(
-                    f"「{a.token}」与「{b.token}」之间隔着「{between.strip() or '助动词'}」，"
+                    f"[R-SCOPE] 「{a.token}」与「{b.token}」之间隔着「{between.strip() or '助动词'}」，"
                     "作用域可能归属不同，需逐段确认"
                 )
 
     decisive = sum(n.weight for n in rep.negations if n.kind != "ambiguous")
     if decisive >= DEPTH_WARN:
-        rep.warnings.append(f"有效否定层数 {decisive}，超过 {DEPTH_WARN - 1} 层，读者难以稳定解码")
+        rep.warnings.append(f"[R-DEPTH] 有效否定层数 {decisive}，超过 {DEPTH_WARN - 1} 层，读者难以稳定解码")
     if rep.total_weight == 0:
-        rep.warnings.append("未发现否定词，本句不在绕弯范畴内")
+        rep.warnings.append("[R-NONE] 未发现否定词，本句不在绕弯范畴内")
     if any(n.kind == "lexical" for n in rep.negations):
         lexical = [n.token for n in rep.negations if n.kind == "lexical"]
-        rep.warnings.append(f"含词汇化否定 {'、'.join(lexical)}，纯字面计数容易漏")
+        rep.warnings.append(f"[R-LEXICAL] 含词汇化否定 {'、'.join(lexical)}，纯字面计数容易漏")
+
+    rep.rule_ids = sorted(set(re.findall(r"\[(R-[A-Z]+)\]", "".join(rep.ambiguities + rep.warnings))))
+
+    # 规则冲突检测：同一句里三条以上规则同时触发，极性结论可能互相覆盖
+    if len(rep.rule_ids) >= 3:
+        rep.warnings.append(
+            f"[R-CONFLICT] 同一句内 {len(rep.rule_ids)} 条规则同时触发（{'、'.join(rep.rule_ids)}），"
+            "极性结论可能互相覆盖，需人工裁决"
+        )
+        rep.rule_ids = sorted(set(rep.rule_ids) | {"R-CONFLICT"})
+
+    # 状态与置信度：歧义优先，其次风险，最后干净；没有否定词则视为不在范围内
+    if rep.total_weight == 0:
+        rep.status, rep.confidence = "unknown", 0.0
+    elif len(rep.ambiguities) >= 2:
+        rep.status, rep.confidence = "ambiguous", 0.3
+    elif rep.ambiguities:
+        rep.status, rep.confidence = "ambiguous", 0.5
+    elif rep.warnings:
+        rep.status, rep.confidence = "low_confidence", 0.7
+    else:
+        rep.status, rep.confidence = "ok", 0.95
     return rep
 
 
@@ -236,6 +265,7 @@ def render(rep: Report) -> str:
     if rep.warnings:
         out.append("风险：")
         out.extend(f"  ! {w}" for w in rep.warnings)
+    out.append(f"状态：{rep.status}  置信度：{rep.confidence:.2f}  触发规则：{'、'.join(rep.rule_ids) or '无'}")
     out.append("\n作用域为浅层启发式标定；跨小句的深层修饰仍需人工确认。")
     return "\n".join(out)
 
@@ -253,12 +283,19 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.file:
-        text = Path(args.file).read_text(encoding="utf-8").strip()
+        try:
+            text = Path(args.file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            print(f"读取文件失败：{exc}", file=sys.stderr)
+            return 4
     else:
         text = " ".join(args.sentence).strip()
     if not text:
-        ap.print_help()
-        return 1
+        print("空输入：需要一句待分析的中文句子", file=sys.stderr)
+        return 4
+    if len(text) > MAX_INPUT_CHARS:
+        print(f"输入过长：{len(text)} 字，上限 {MAX_INPUT_CHARS} 字；请切分成小句再分析", file=sys.stderr)
+        return 4
 
     rep = analyze(text)
     if args.json:
