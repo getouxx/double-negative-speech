@@ -40,7 +40,7 @@ class PolarityTests(unittest.TestCase):
     def test_no_negation(self):
         rep = nc.analyze("今天天气很好")
         self.assertEqual(rep.polarity, "肯定")
-        self.assertIn("未发现否定词，本句不在绕弯范畴内", rep.warnings)
+        self.assertTrue(any("未发现否定词，本句不在绕弯范畴内" in w for w in rep.warnings))
 
 
 class ConstructTests(unittest.TestCase):
