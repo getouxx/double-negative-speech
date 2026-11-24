@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""绕弯 CLI：脱离 Agent 框架，直接在脚本里调用分析能力。
+"""绕弯 CLI：Skill 的稳定接口层，脱离 Agent 框架也能调用。
 
 用法：
+    python3 scripts/wanhua.py solve "不是不该改"        # 契约输出（默认 JSON）
     python3 scripts/wanhua.py analyze "不是不该认真一点"
     python3 scripts/wanhua.py compare "不是不该改" "该改"
     python3 scripts/wanhua.py check "差点没赶上"
     python3 scripts/wanhua.py templates
 
+退出码：0=ok/low_confidence；3=ambiguous/unknown；4=输入或运行时错误；2=参数错误。
+契约字段见 references/contract.md。
+
 Python 调用：
-    from wanhua import analyze, compare, check
-    analyze("不是不该改")["polarity"]   # → "肯定"
+    from wanhua import solve, analyze, compare, check
+    solve("不是不该改")["polarity"]   # → "肯定"
 """
 from __future__ import annotations
 
@@ -22,6 +26,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import negation_count as nc  # noqa: E402
+
+__version__ = "1.2.0"
+
+SKILL_NAME = "double-negative-speech"
 
 TEMPLATES = [
     ("不是不 X", "X（语气留余地）"),
@@ -64,6 +72,9 @@ PRAGMATIC_CHECKS = [
     ),
 ]
 
+# 语用层只覆盖这三类，别当成完整语用推理
+PRAGMATIC_COVERAGE = "有限覆盖：委婉软化 / 反讽 / 反问；不覆盖语气强度、礼貌层级、方言差异"
+
 
 def analyze(sentence: str) -> dict:
     """返回结构化解码结果（极性、作用域、歧义、风险）。"""
@@ -98,6 +109,7 @@ def pragmatic_risks(sentence: str) -> list[dict]:
                 "why": why,
                 "fix": fix,
                 "layer": "pragmatic",
+                "heuristic": True,
             })
     # 反讽只在句子里真的带否定词时才成立，避免把「他真是够努力」误报
     if any(h["type"] == "sarcasm" for h in hits):
@@ -139,12 +151,104 @@ def check(sentence: str) -> dict:
     }
 
 
+def _split_rules(items: list[str]) -> list[dict]:
+    """把带 [R-XXX] 前缀的条目拆成 {id, note}，供宿主做可解释展示。"""
+    out: list[dict] = []
+    for item in items:
+        m = re.match(r"\[(R-[A-Z]+)\]\s*(.*)", item)
+        if m:
+            out.append({"id": m.group(1), "note": m.group(2)})
+        else:
+            out.append({"id": "R-RAW", "note": item})
+    return out
+
+
+def solve(text: str, mode: str = "decode") -> dict:
+    """Skill 级契约输出：固定字段、显式状态、置信度、可追溯规则。
+
+    字段定义见 references/contract.md。status 语义：
+      ok             —— 规则层干净，可直接交付
+      low_confidence —— 能算，但有词汇化/层级风险，建议复核
+      ambiguous      —— 规则层已标歧义，不能当唯一解
+      unknown        —— 没有否定词，本句不在绕弯范畴
+      error          —— 输入不合法（空、超长）
+    """
+    raw = (text or "").strip()
+    base = {
+        "skill": SKILL_NAME,
+        "version": __version__,
+        "mode": mode,
+        "input_text": raw,
+    }
+    if not raw:
+        return {**base, "status": "error", "polarity": None, "confidence": 0.0,
+                "rules": [], "scope": [], "pragmatic_hint": None,
+                "explain": "空输入", "next_step": "传入一句中文句子，长度 1~200 字"}
+    if len(raw) > nc.MAX_INPUT_CHARS:
+        return {**base, "status": "error", "polarity": None, "confidence": 0.0,
+                "rules": [], "scope": [], "pragmatic_hint": None,
+                "explain": f"输入 {len(raw)} 字，超过上限 {nc.MAX_INPUT_CHARS} 字",
+                "next_step": "按标点切成小句，逐句分析"}
+
+    rep = nc.analyze(raw)
+    pragmatic = pragmatic_risks(raw)
+
+    polarity = None if rep.status == "unknown" else rep.polarity
+    explain = (
+        f"否定权重合计 {rep.total_weight}，按奇偶折叠为{rep.polarity}"
+        if rep.total_weight else "未命中否定词"
+    )
+    if rep.rule_ids:
+        explain += f"；触发规则 {'、'.join(rep.rule_ids)}"
+
+    if rep.status == "unknown":
+        next_step = "不是绕弯句，按普通语义理解"
+    elif rep.status == "ambiguous":
+        next_step = "不能作为唯一解：补语境，或按 rules 里对应规则改写"
+    elif rep.status == "low_confidence":
+        next_step = "可用，但先看 risks（多为词汇化否定或层级过深）"
+    else:
+        next_step = "规则层干净，可交付；仍建议核对作用域是否符合原意"
+
+    return {
+        **base,
+        "status": rep.status,
+        "polarity": polarity,
+        "confidence": rep.confidence,
+        "rules": _split_rules(rep.ambiguities + rep.warnings),
+        "scope": [{"token": n.token, "weight": n.weight, "kind": n.kind, "scope": n.scope}
+                  for n in rep.negations],
+        "pragmatic_hint": {
+            "heuristic": True,
+            "coverage": PRAGMATIC_COVERAGE,
+            "items": pragmatic,
+            "affects_polarity": False,
+        },
+        "explain": explain,
+        "next_step": next_step,
+    }
+
+
+EXIT_OK = 0
+EXIT_NEEDS_CONTEXT = 3
+EXIT_INPUT_ERROR = 4
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return 1
     cmd, rest = argv[0], argv[1:]
 
+    if cmd == "solve":
+        if not rest:
+            print("solve 需要一句文本", file=sys.stderr)
+            return EXIT_INPUT_ERROR
+        result = solve(" ".join(rest))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if result["status"] == "error":
+            return EXIT_INPUT_ERROR
+        return EXIT_OK if result["status"] in ("ok", "low_confidence") else EXIT_NEEDS_CONTEXT
     if cmd == "analyze" and rest:
         print(json.dumps(analyze(" ".join(rest)), ensure_ascii=False, indent=2))
     elif cmd == "compare" and len(rest) >= 2:
