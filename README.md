@@ -156,7 +156,7 @@ $ python3 scripts/negation_count.py "不想不安装在脑子里的知识"
 也能当库用，脱离 Agent 框架：
 
 ```python
-from wanhua import analyze, compare, check
+from wanhua import solve, analyze, compare, check
 analyze("不是不该改")["polarity"]      # '肯定'
 compare("不是不该改", "该改")["same_polarity"]  # True
 ```
@@ -196,7 +196,7 @@ $ python3 scripts/wanhua.py solve "差点没赶上"
 ```
 （真实输出，退出码 `3`。）
 
-四个状态决定能不能交付：
+五种 `status` 决定能不能交付：
 
 | `status` | 什么时候出现 | 宿主怎么办 |
 | --- | --- | --- |
