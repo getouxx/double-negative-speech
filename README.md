@@ -2,7 +2,9 @@
 
 **中文绕弯话术的生成与解码 Skill：把否定当算子处理——否定极性的奇偶折叠 × 作用域定域 × 量词范围 × 条件套嵌。**
 
-当前版本 **v1.2.0**。调用契约（字段、状态、退出码、规则编号）见 [`references/contract.md`](references/contract.md)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。
+Generate or decode Chinese double-negation / hedging constructions with an explainable rule contract — fixed JSON, a three-tier certainty, no guessing when rules cannot decide. `pip install -e .` gives you the `wanhua` CLI without an Agent framework.
+
+当前版本 **v1.3.0**。调用契约（字段、状态、退出码、规则编号）见 [`references/contract.md`](references/contract.md)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 范围说清楚：它只管**逻辑绕**（否定层数、否定修饰谁、量词全称与否、条件让步骨架），不管**词义绕**（生造词、别扭搭配、同音错字）。前者能唯一解码，后者读不懂就是写坏了。
 
@@ -196,7 +198,7 @@ $ python3 scripts/wanhua.py solve "差点没赶上"
 ```
 （真实输出，退出码 `3`。）
 
-五种 `status` 决定能不能交付：
+六种 `status` 决定能不能交付：
 
 | `status` | 什么时候出现 | 宿主怎么办 |
 | --- | --- | --- |
@@ -204,24 +206,40 @@ $ python3 scripts/wanhua.py solve "差点没赶上"
 | `low_confidence` | 有词汇化否定或层级过深，无歧义 | 交付时带上 `rules` |
 | `ambiguous` | 量词降级 / 特殊形式 / 作用域分歧 / 规则冲突 | 不能当唯一解，补语境或并列两种读法 |
 | `unknown` | 没有否定词（`polarity: null`） | 不是绕弯句，按普通语义理解 |
+| `out_of_scope` | 反问/反讽已翻转字面极性（`polarity`、`confidence` 均为 `null`） | **不要给极性**，交人工复核 |
 | `error` | 空输入、超 200 字、文件读不了 | 修输入重试，**别把 error 当否定** |
 
-退出码：`0` 可交付、`3` 需补语境、`4` 输入错误（错误写 `stderr`）、`2` 参数错误。完整字段与规则编号表在 `references/contract.md`。
+状态之外还有一档更粗的信号 `certainty`：`certain`（可直接采信）/ `uncertain`（极性仅供参考）/ `out_of_scope`（不给极性）。`rules_version` 单独记规则库版本，规则漂移与脚本版本解耦。`check` 另外给 `matched_rules`（命中的规则 ID）与 `conflicts`（互斥规则组合 + 原因），规则冲突不必再靠肉眼找。
 
-## 准确率：有标注集，能回落就报警
+退出码：`0` 可交付、`3` 需补语境或交人工、`4` 输入错误（错误写 `stderr`）、`2` 参数错误。完整字段与规则编号表在 `references/contract.md`。
+
+## 准确率：有标注集，也有盲测
+
+两套集子分工不同，别再问"测试全绿是不是就不会错"：
 
 ```bash
 $ python3 scripts/evaluate.py
 用例数：33
 极性准确率：84.38%
+否定类召回：77.78%（9 条否定句）
+否定类精确：70.00%
 状态准确率：100.00%
-错例：
-  - [lexical-limitation] 难免有些遗憾  polarity: 期望 肯定 / 实得 否定
-  - [special-form-limitation] 他差点没摔倒  polarity: 期望 否定 / 实得 肯定
-  ...
 ```
 
-标注集 `tests/labeled_cases.json` 记的是**语义极性**（人判），不是字面折叠结果——所以上表能暴露漏数、量词、特殊形式造成的翻转。已知漏判（词汇化否定、`差点没`、复杂辖域）如实留在错例里，不调标注迁就规则；`tests/test_accuracy.py` 把 80% / 90% 作为下限，掉下去就红。
+```bash
+$ python3 scripts/evaluate.py --holdout --min-acc 0.75
+用例数：60
+极性准确率：88.33%
+否定类召回：92.31%（26 条否定句）
+否定类精确：85.71%
+```
+
+- `tests/labeled_cases.json`（33 条）是**规则回归集**：写了规则就该过，错了说明规则被改坏。
+- `tests/holdout_cases.json`（60 条）是**盲测集**：编写时不参照规则表条目，只按语义标极性，回答"没被规则覆盖过的句子准不准"。
+
+盲测错例 7 条，全部落在已声明的盲区：词汇化否定（`难免`/`不免`/`难免不`）、特殊形式（`差点没`）、无否定词句（返回 `unknown` / `polarity: null`，按设计不算"猜"）。盲测出现新类别，`tests/test_holdout.py` 会直接失败——逼着把覆盖声明更新，而不是继续闷头加规则。
+
+诚实交代两点：① 这不是语料 hold-out，CCL 等授权语料未接入，句子是独立编写的，仍属"已知盲区"的量化补充；② 否定类召回 92% 是在 26 条否定句上的数，样本小，别当总体召回率引用。
 
 ## 测试
 
@@ -229,16 +247,29 @@ $ python3 scripts/evaluate.py
 python3 -m unittest discover -s tests -v
 ```
 
-61 条用例，分四个文件：
+73 条用例，分五个文件：
 
 - `tests/test_negation_count.py`（32 条）：极性奇偶、构式权重、词汇化否定、歧义结构、量词降级（含反例）、作用域边界、假阳性、CLI 契约；`FailureCaseTests` 直接对应 `failure_cases.md` 的 FC-04/09/12/15/16。
 - `tests/test_wanhua.py`（11 条）：`check` 的规则层/语用层分离、委婉软化正反例、反讽需带否定词、`compare` 折叠验证、字段契约。
-- `tests/test_contract.py`（15 条）：`solve` 字段稳定性、状态语义、退出码 `0/3/4`、空输入与超长输入、错误走 `stderr`、规则编号可追溯。
+- `tests/test_contract.py`（20 条）：`solve` 字段稳定性、状态语义与确定性三档、`out_of_scope` 不硬判、退出码 `0/3/4`、空输入与超长输入、错误走 `stderr`、规则编号与冲突可追溯。
 - `tests/test_accuracy.py`（3 条）：标注集极性/状态准确率下限。
+- `tests/test_holdout.py`（4 条）：盲测集规模、准确率与召回下限、错例必须落在已知盲区。
 
 改规则前先跑基线，改完再跑，红一条就说明行为被改坏了。
 
 ## 安装
+
+作为 Python 包（只想用 CLI、不要 Agent 目录）：
+
+```bash
+pip install -e .             # 得到 `wanhua` 与 `negation-count` 两个命令
+uv tool install .            # 或者用 uv
+wanhua solve "差点没赶上"     # 不需要 python3 scripts/... 全路径
+```
+
+`pyproject.toml` 只声明纯标准库依赖，Python ≥ 3.8；模块来自 `scripts/`（`wanhua` / `negation_count` / `evaluate`），不改核心逻辑。
+
+作为 Skill：
 
 ```bash
 ./install.sh                 # 复制到"已存在"的各平台 Skill 目录，不会新建目录

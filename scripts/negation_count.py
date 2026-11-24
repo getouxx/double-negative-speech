@@ -19,7 +19,9 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
+# 规则库语义化版本：改词表/阈值/规则编号都算规则变更，与脚本版本同步升
+RULES_VERSION = "1.3.0"
 MAX_INPUT_CHARS = 200
 
 # ---------------------------------------------------------------- 词表
@@ -90,6 +92,17 @@ QUANTIFIER_MAX_GAP = 8
 SCOPE_SPLITTERS = ["想", "愿意", "打算", "能够", "可以", "会", "敢", "该", "需要"]
 DEPTH_WARN = 4
 
+# 已知互斥的规则组合：两条规则同时命中时，极性信号无法同时成立。
+# 这是**精选清单**，不是穷举——没列进来的组合只是"没检查过"，不等于"不冲突"。
+CONFLICT_PAIRS: list[tuple[set[str], set[str], str]] = [
+    ({"R-SPECIAL"}, {"R-LEXICAL"},
+     "特殊形式歧义与词汇化否定同时出现：字面计数与词汇化信号指向不同极性"),
+    ({"R-QUANT"}, {"R-SPECIAL"},
+     "量词降级与特殊形式叠加：部分否与整体翻转不能同时成立"),
+    ({"R-SCOPE"}, {"R-DEPTH"},
+     "深层否定且作用域被助动词隔开：任何单一极性结论都不成立"),
+]
+
 
 @dataclass
 class Negation:
@@ -114,6 +127,9 @@ class Report:
     status: str = "ok"          # ok | low_confidence | ambiguous | unknown | error
     confidence: float = 0.0     # 规则置信度 0~1，歧义越多越低
     rule_ids: list[str] = field(default_factory=list)
+    certainty: str = "certain"  # certain | uncertain | out_of_scope
+    conflicts: list[dict] = field(default_factory=list)  # 规则之间的极性冲突
+    rules_version: str = RULES_VERSION
     skill_version: str = __version__
 
 
@@ -233,17 +249,29 @@ def analyze(text: str) -> Report:
         )
         rep.rule_ids = sorted(set(rep.rule_ids) | {"R-CONFLICT"})
 
-    # 状态与置信度：歧义优先，其次风险，最后干净；没有否定词则视为不在范围内
+    # 规则冲突：命中了互斥组合，极性信号互相覆盖
+    present = set(rep.rule_ids)
+    for left, right, reason in CONFLICT_PAIRS:
+        hit = (present & left) | (present & right)
+        if present & left and present & right:
+            rep.conflicts.append({"rules": sorted(hit), "reason": reason})
+
+    # 状态、置信度与确定性三档：
+    #   certain      规则覆盖且干净，极性可直接采信
+    #   uncertain    规则命中但有风险/冲突，极性仅供参考
+    #   out_of_scope 没有否定词（或语用层已翻转），规则层给不出结论，交人工
     if rep.total_weight == 0:
-        rep.status, rep.confidence = "unknown", 0.0
+        rep.status, rep.confidence, rep.certainty = "unknown", 0.0, "out_of_scope"
+    elif rep.conflicts:
+        rep.status, rep.confidence, rep.certainty = "ambiguous", 0.4, "uncertain"
     elif len(rep.ambiguities) >= 2:
-        rep.status, rep.confidence = "ambiguous", 0.3
+        rep.status, rep.confidence, rep.certainty = "ambiguous", 0.3, "uncertain"
     elif rep.ambiguities:
-        rep.status, rep.confidence = "ambiguous", 0.5
+        rep.status, rep.confidence, rep.certainty = "ambiguous", 0.5, "uncertain"
     elif rep.warnings:
-        rep.status, rep.confidence = "low_confidence", 0.7
+        rep.status, rep.confidence, rep.certainty = "low_confidence", 0.7, "uncertain"
     else:
-        rep.status, rep.confidence = "ok", 0.95
+        rep.status, rep.confidence, rep.certainty = "ok", 0.95, "certain"
     return rep
 
 
@@ -265,7 +293,14 @@ def render(rep: Report) -> str:
     if rep.warnings:
         out.append("风险：")
         out.extend(f"  ! {w}" for w in rep.warnings)
-    out.append(f"状态：{rep.status}  置信度：{rep.confidence:.2f}  触发规则：{'、'.join(rep.rule_ids) or '无'}")
+    out.append(
+        f"状态：{rep.status}  确定性：{rep.certainty}  "
+        f"置信度：{rep.confidence if rep.confidence is not None else 'null'}  "
+        f"触发规则：{'、'.join(rep.rule_ids) or '无'}"
+    )
+    if rep.conflicts:
+        out.append("规则冲突：")
+        out.extend(f"  × {'、'.join(c['rules'])}：{c['reason']}" for c in rep.conflicts)
     out.append("\n作用域为浅层启发式标定；跨小句的深层修饰仍需人工确认。")
     return "\n".join(out)
 

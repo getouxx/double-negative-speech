@@ -47,7 +47,7 @@ python3 -m unittest discover -s tests -v   # 改之后再跑
 规则改动必须同时：
 
 1. 补一条回归用例：规则层（极性/作用域/量词）进 `tests/test_negation_count.py`，`check` 的判定与语用提示进 `tests/test_wanhua.py`，用例名写清它防的是什么（如 `test_quantifier_trap_flagged`、`test_fc_p2_soft_refusal`）。
-2. 跑标注集：`python3 scripts/evaluate.py`，极性准确率不得低于基线 80%（当前 84.38%）；如果因为修好某个漏判导致标注过期，同时更新 `tests/labeled_cases.json` 与 `tests/test_accuracy.py` 的基线说明。
+2. 跑两套集子：`python3 scripts/evaluate.py`（回归集，下限 0.80，当前 84.38%）与 `python3 scripts/evaluate.py --holdout --min-acc 0.75`（盲测集，当前 88.33%）。盲测涨了要说明覆盖面扩大，跌了说明规则改动影响了泛化。；如果因为修好某个漏判导致标注过期，同时更新 `tests/labeled_cases.json` 与 `tests/test_accuracy.py` 的基线说明。
 3. 如果改变了极性判定，在 `references/failure_cases.md` 里回填被修掉的案例，并把"回归用例"列填上。
 4. 契约变更另有规矩，见下节。
 
@@ -55,7 +55,7 @@ python3 -m unittest discover -s tests -v   # 改之后再跑
 
 `references/contract.md` 在 v1.2.0 冻结。字段和语义是宿主依赖的东西：
 
-- 新增字段：兼容，直接加，README/SKILL.md 的摘要表同步补一行。
+- 新增字段：兼容，直接加，README/SKILL.md 的摘要表同步补一行；`certainty` 三档与 `rules_version` 已冻结，新增取值要升 `RULES_VERSION` 并写 CHANGELOG。
 - 删除字段、改字段名、改 `status` 取值、改退出码语义：破坏性变更，必须升 `version`（`wanhua.py` 与 `negation_count.py` 两处），并在 `CHANGELOG.md` 写"改了什么、宿主需要怎么适配"。
 - 新增规则编号（`R-XXX`）：兼容，但要更新 `contract.md` 的编号表，否则用户查不到解释。
 - 改完跑 `python3 -m unittest discover -s tests` 与 `python3 scripts/evaluate.py`，两边都绿才算完。

@@ -2,6 +2,19 @@
 
 规则表一改，Agent 的行为就会漂。所以每次改词表、改阈值、改契约，都在这里留一行：改了什么、影响哪类句子、测试怎么变。
 
+## v1.3.0 — 2026-11-25
+
+**分层兜底 + 规则溯源 + 盲测（契约扩展，宿主需新增分支）**
+
+- 新增 `certainty` 三档：`certain` / `uncertain` / `out_of_scope`。`uncertain` 的极性仅供参考；`out_of_scope` 时 `polarity` 与 `confidence` 一律为 `null`，不再"硬判一个低置信度极性"。
+- 新增 `status` 取值 `out_of_scope`：反问/反讽迹象已翻转字面极性，或规则层完全给不出证据时使用；退出码 `3`。
+- 新增 `rules_version`（规则库语义化版本，当前 1.3.0），与 `skill.version` 解耦。
+- `check` 新增 `matched_rules`（命中规则 ID）与 `conflicts`（互斥组合 + 原因）；目前冲突清单为精选三条（`R-SPECIAL`+`R-LEXICAL`、`R-QUANT`+`R-SPECIAL`、`R-SCOPE`+`R-DEPTH`），未列入表示未检查，不是"不冲突"。
+- 新增 `tests/holdout_cases.json`（60 条独立编写的盲测句）与 `tests/test_holdout.py`：极性 88.33%、否定类召回 92.31%、精确 85.71%；错例 7 条全在已声明盲区（`难免`/`不免`/`难免不`、`差点没`、无否定词）。
+- `scripts/evaluate.py` 新增 `--holdout` 与否定类精确/召回指标。
+- 新增 `pyproject.toml`：`pip install -e .` / `uv tool install .` 可直接得到 `wanhua`、`negation-count` 命令；`SKILL.md` description 补英文一句，新增 `README.en.md`。
+- 测试 61 → 73 条，全绿。
+
 ## 文档补充 — 2026-11-25
 
 **「宿主没有 Python 怎么办」**（兼容变更，脚本行为与契约版本不变）

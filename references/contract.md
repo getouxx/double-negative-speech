@@ -1,4 +1,4 @@
-# 调用契约（v1.2.0）
+# 调用契约（v1.3.0）
 
 宿主要能可靠调用一个 Skill，靠的不是 README 写得好看，而是**字段固定、状态可判、失败有语义**。这份文件就是契约本身；`SKILL.md` 只做摘要，细节以本文为准。
 
@@ -52,7 +52,9 @@
 | `skill` / `version` | string | 固定 slug 与版本号；宿主可据此判断契约是否变化 |
 | `mode` | `decode` / `manual` | 脚本只输出 `decode`；`manual` 由宿主在没有 Python 环境时自行填写，见下节 |
 | `input_text` | string | 原样回显（已 strip），便于日志对齐 |
-| `status` | enum | `ok` / `low_confidence` / `ambiguous` / `unknown` / `error`，见下 |
+| `status` | enum | `ok` / `low_confidence` / `ambiguous` / `unknown` / `out_of_scope` / `error`，见下 |
+| `certainty` | enum | `certain` / `uncertain` / `out_of_scope`：三档确定性，uncertain 的极性仅供参考 |
+| `rules_version` | string | 规则库语义化版本（与 `skill.version` 解耦：规则改了就升这个） |
 | `polarity` | `"肯定"` / `"否定"` / `null` | 规则层折叠结果；`unknown` 与 `error` 时为 `null` |
 | `confidence` | 0~1 / `null` | 规则置信度，不是语言正确率；脚本取值 0.95 / 0.7 / 0.5 / 0.3 / 0.0，`manual` 模式必须是 `null` |
 | `rules` | array | 触发的规则，元素 `{id, note}`，`id` 形如 `R-QUANT`，用于可解释展示 |
@@ -68,7 +70,8 @@
 | `ok` | 无歧义、无风险 | 可直接交付；仍建议核对作用域 |
 | `low_confidence` | 有风险但无歧义（词汇化否定、层级过深） | 可交付，但把 `rules` 一并说明 |
 | `ambiguous` | 规则层已标出歧义（量词、特殊形式、作用域、冲突） | **不能当唯一解**：补语境、改写，或并列两种解读 |
-| `unknown` | 没有命中否定词 | 不是绕弯句，按普通语义理解；`polarity` 为 `null` |
+| `unknown` | 没有命中否定词，且无语用翻转迹象 | 不是绕弯句，按普通语义理解；`polarity` 为 `null` |
+| `out_of_scope` | 反问/反讽迹象已推翻字面极性（`pragmatic_hint` 命中 rhetorical/sarcasm） | **不要给极性**：`polarity` 与 `confidence` 均为 `null`，交人工复核 |
 | `error` | 空输入、超长、读取失败 | 修输入后重试，不要把 `error` 当成"否定" |
 
 ## 退出码
@@ -77,10 +80,23 @@
 | --- | --- |
 | `0` | `ok` / `low_confidence` |
 | `2` | 参数错误（argparse 默认） |
-| `3` | `ambiguous` / `unknown`——JSON 仍然有效，只是不能当唯一解 |
+| `3` | `ambiguous` / `unknown` / `out_of_scope`——JSON 仍然有效，只是不能当唯一解 |
 | `4` | 输入或运行时错误（空、超长、文件读不了）；错误信息写 `stderr` |
 
 `negation_count.py` 同样遵守 `0 / 4`；它的 `--json` 输出与 `solve` 共享 `status/confidence/rule_ids`。
+
+## 确定性与规则溯源
+
+`certainty` 是三档兜底，避免"硬判但可能判错"：
+
+- `certain`：规则覆盖、无歧义、无风险；`confidence` 0.95。
+- `uncertain`：命中特殊形式/词汇化/作用域/层级/冲突之一；`confidence` 0.3~0.7，**极性仅供参考**。
+- `out_of_scope`：规则给不出结论（语用翻转或无否定词）；`polarity` 与 `confidence` 均为 `null`。
+
+`check` 另外暴露两项溯源信息：
+
+- `matched_rules`：本句命中的规则 ID 列表（与 `solve.rules[].id` 同源）。
+- `conflicts`：`[{rules:[R-A,R-B], reason}]`，互斥规则组合。目前是一张**精选清单**（`R-SPECIAL`+`R-LEXICAL`、`R-QUANT`+`R-SPECIAL`、`R-SCOPE`+`R-DEPTH`），没列进来的组合只是没检查过，不等于不冲突。
 
 ## 规则编号
 

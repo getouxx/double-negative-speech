@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import negation_count as nc  # noqa: E402
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 SKILL_NAME = "double-negative-speech"
 
@@ -143,6 +143,9 @@ def check(sentence: str) -> dict:
         "text": sentence,
         "polarity": rep.polarity,
         "weight": rep.total_weight,
+        "certainty": rep.certainty,
+        "matched_rules": rep.rule_ids,
+        "conflicts": rep.conflicts,
         "pass": passed,
         "risks": risks,
         "warnings": warnings,
@@ -182,10 +185,12 @@ def solve(text: str, mode: str = "decode") -> dict:
     }
     if not raw:
         return {**base, "status": "error", "polarity": None, "confidence": 0.0,
+                "certainty": "out_of_scope", "rules_version": nc.RULES_VERSION,
                 "rules": [], "scope": [], "pragmatic_hint": None,
                 "explain": "空输入", "next_step": "传入一句中文句子，长度 1~200 字"}
     if len(raw) > nc.MAX_INPUT_CHARS:
         return {**base, "status": "error", "polarity": None, "confidence": 0.0,
+                "certainty": "out_of_scope", "rules_version": nc.RULES_VERSION,
                 "rules": [], "scope": [], "pragmatic_hint": None,
                 "explain": f"输入 {len(raw)} 字，超过上限 {nc.MAX_INPUT_CHARS} 字",
                 "next_step": "按标点切成小句，逐句分析"}
@@ -193,7 +198,17 @@ def solve(text: str, mode: str = "decode") -> dict:
     rep = nc.analyze(raw)
     pragmatic = pragmatic_risks(raw)
 
-    polarity = None if rep.status == "unknown" else rep.polarity
+    # 语用层已翻转（反问/反讽）或压根没有否定词 —— 规则层给不出可信极性，
+    # 直接报 out_of_scope，不硬塞一个低置信度的"肯定/否定"。
+    pragmatic_flip = any(p["type"] in ("rhetorical", "sarcasm") for p in pragmatic)
+    if rep.status == "unknown":
+        status, certainty = ("out_of_scope", "out_of_scope") if pragmatic else ("unknown", "out_of_scope")
+    elif pragmatic_flip:
+        status, certainty = "out_of_scope", "out_of_scope"
+    else:
+        status, certainty = rep.status, rep.certainty
+
+    polarity = None if status in ("unknown", "out_of_scope") else rep.polarity
     explain = (
         f"否定权重合计 {rep.total_weight}，按奇偶折叠为{rep.polarity}"
         if rep.total_weight else "未命中否定词"
@@ -201,9 +216,20 @@ def solve(text: str, mode: str = "decode") -> dict:
     if rep.rule_ids:
         explain += f"；触发规则 {'、'.join(rep.rule_ids)}"
 
-    if rep.status == "unknown":
+    if rep.total_weight == 0 and not pragmatic:
+        explain = "未命中否定词"
+    elif status == "out_of_scope":
+        kinds = "、".join(sorted({p["type"] for p in pragmatic})) or "无否定证据"
+        explain = (
+            f"规则层给不出可信极性：命中语用迹象 {kinds}，"
+            "反问/反讽会翻转字面极性，纯规则匹配无法定论"
+        )
+
+    if status == "unknown":
         next_step = "不是绕弯句，按普通语义理解"
-    elif rep.status == "ambiguous":
+    elif status == "out_of_scope":
+        next_step = "超出规则覆盖范围，建议人工复核：不要在此给出极性结论"
+    elif status == "ambiguous":
         next_step = "不能作为唯一解：补语境，或按 rules 里对应规则改写"
     elif rep.status == "low_confidence":
         next_step = "可用，但先看 risks（多为词汇化否定或层级过深）"
@@ -212,9 +238,11 @@ def solve(text: str, mode: str = "decode") -> dict:
 
     return {
         **base,
-        "status": rep.status,
+        "status": status,
+        "certainty": certainty,
+        "rules_version": nc.RULES_VERSION,
         "polarity": polarity,
-        "confidence": rep.confidence,
+        "confidence": None if status == "out_of_scope" else rep.confidence,
         "rules": _split_rules(rep.ambiguities + rep.warnings),
         "scope": [{"token": n.token, "weight": n.weight, "kind": n.kind, "scope": n.scope}
                   for n in rep.negations],
@@ -234,7 +262,9 @@ EXIT_NEEDS_CONTEXT = 3
 EXIT_INPUT_ERROR = 4
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return 1

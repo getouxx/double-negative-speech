@@ -1,12 +1,12 @@
 ---
 name: double-negative-speech
 display_name: "绕弯说话术"
-description: 生成或解码“绕弯子”的中文句子：用双重否定、多重否定、反向修饰、条件套嵌、范围挪移把真实意思埋在句子里，或把这类绕晕人的句子翻成一句直白人话。当用户要（1）把直白的话说得绕、留有余地、不像在表态，（2）出带陷阱的选择题/勾选项/阅读理解题、做话术测试，（3）判断“勾选/不勾选”“能不能/是不是”这类句子到底什么意思，（4）把绕口句子翻译成人话、拆解语义时使用。也可用于审校此类表述是否会产生歧义。
+description: 生成或解码“绕弯子”的中文句子：用双重否定、多重否定、反向修饰、条件套嵌、范围挪移把真实意思埋在句子里，或把这类绕晕人的句子翻成一句直白人话。当用户要（1）把直白的话说得绕、留有余地、不像在表态，（2）出带陷阱的选择题/勾选项/阅读理解题、做话术测试，（3）判断“勾选/不勾选”“能不能/是不是”这类句子到底什么意思，（4）把绕口句子翻译成人话、拆解语义时使用。也可用于审校此类表述是否会产生歧义。 English: generate or decode Chinese double-negation / hedging constructions with an explainable, rule-based contract; returns fixed JSON fields with a certainty tier instead of guessing.
 ---
 
 # 绕弯说话术
 
-> 契约版本 v1.2.0，字段与语义见 `references/contract.md`；变更记录见 `CHANGELOG.md`。
+> 契约版本 v1.3.0，字段与语义见 `references/contract.md`；变更记录见 `CHANGELOG.md`。
 
 ## 什么时候用
 
@@ -33,7 +33,9 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 
 | 字段 | 取值 | 宿主怎么用 |
 | --- | --- | --- |
-| `status` | `ok` / `low_confidence` / `ambiguous` / `unknown` / `error` | 决定能不能直接交付 |
+| `status` | `ok` / `low_confidence` / `ambiguous` / `unknown` / `out_of_scope` / `error` | 决定能不能直接交付 |
+| `certainty` | `certain` / `uncertain` / `out_of_scope` | 三档兜底：uncertain 的极性仅供参考，out_of_scope 不给极性 |
+| `rules_version` | string | 规则库语义化版本，规则漂移可追溯 |
 | `polarity` | `肯定` / `否定` / `null` | 结论；`unknown`、`error` 时为 `null` |
 | `confidence` | 0~1 / `null` | 只是规则置信度，不是语言正确率；`manual` 模式必须为 `null` |
 | `rules` | `[{id, note}]` | 歧义来自哪条规则，可原样转述给用户 |
@@ -62,9 +64,22 @@ description: 生成或解码“绕弯子”的中文句子：用双重否定、�
 | `low_confidence` | 有风险（词汇化否定、层级过深）但无歧义 | 交付时把 `rules` 一并说明 |
 | `ambiguous` | 规则层已标歧义 | **不能当唯一解**：补语境、改写，或两种解读并列 |
 | `unknown` | 没有否定词 | 不是绕弯句，按普通语义理解 |
+| `out_of_scope` | 反问/反讽已翻转字面极性，规则层给不出可信结论 | **不要给极性**，交人工复核 |
 | `error` | 空输入 / 超长 / 读文件失败 | 修输入，**不要把 error 当成否定** |
 
-退出码：`0` 可交付、`3` 需补语境、`4` 输入或运行时错误（错误写 `stderr`）、`2` 参数错误。
+退出码：`0` 可交付、`3` 需补语境或交人工（`ambiguous` / `unknown` / `out_of_scope`）、`4` 输入或运行时错误（错误写 `stderr`）、`2` 参数错误。
+
+## 确定性三档（分层兜底）
+
+否定和双重否定是统计模型最容易翻车的地方，纯规则也有明确的失效区。所以结论分三档，不硬判：
+
+| `certainty` | 什么时候 | 宿主怎么用 |
+| --- | --- | --- |
+| `certain` | 规则覆盖、无歧义、无已知风险 | 极性可直接采信 |
+| `uncertain` | 命中 `R-SPECIAL` / `R-LEXICAL` / `R-SCOPE` / `R-DEPTH` / `R-CONFLICT` | 极性仅供参考，**要复核** |
+| `out_of_scope` | 反问/反讽已翻转字面极性，或压根没有否定词 | `polarity` 为 `null`，明确报"超出规则覆盖范围，建议人工复核" |
+
+规则库另有语义化版本 `rules_version`：`matched_rules`（命中的规则 ID）与 `conflicts`（互斥规则组合）都随 `check` 输出，规则漂移时宿主能立刻看出来。
 
 ## 失败与边界行为
 
@@ -134,6 +149,7 @@ manual 结果不算"已验证"：对外文本要复核，日志里保留 `mode: 
 - 句式模板、适用条件与扩展方式：`references/patterns.md`
 - 成对例句、正例反例与边界：`references/examples.md`
 - 真实翻车案例（带 `FC-xx` 与回归用例）：`references/failure_cases.md`
+- 盲测集（独立编写、未参照规则表）：`tests/holdout_cases.json`
 - 没有 Python 时的降级执行卡：`references/manual-mode.md`
 - 分析器（极性/作用域/歧义/置信度）：`scripts/negation_count.py`
 - 契约层 CLI（`solve` / `check` / `compare` / `templates`）：`scripts/wanhua.py`

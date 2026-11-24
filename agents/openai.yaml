@@ -1,2 +1,5 @@
 interface:
   display_name: "绕弯说话术"
+  display_name_en: "Double Negative Speech"
+  short_description: "用双重否定把话绕起来，或把绕晕的话翻成人话"
+  short_description_en: "Generate or decode Chinese double negation and hedging, with an explainable rule contract"

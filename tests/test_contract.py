@@ -29,8 +29,9 @@ def run_cli(argv):
 class ContractFieldTests(unittest.TestCase):
     def test_fields_are_stable(self):
         res = wanhua.solve("不是不该改")
-        for key in ("skill", "version", "mode", "input_text", "status", "polarity",
-                    "confidence", "rules", "scope", "pragmatic_hint", "explain", "next_step"):
+        for key in ("skill", "version", "mode", "input_text", "status", "certainty",
+                    "rules_version", "polarity", "confidence", "rules", "scope",
+                    "pragmatic_hint", "explain", "next_step"):
             self.assertIn(key, res)
 
     def test_confidence_bounds(self):
@@ -122,6 +123,61 @@ class ExitCodeTests(unittest.TestCase):
         code, out, err = run_cli(["solve"])
         self.assertEqual(code, wanhua.EXIT_INPUT_ERROR)
         self.assertIn("需要一句文本", err)
+
+
+class CertaintyTierTests(unittest.TestCase):
+    """分层兜底：certain / uncertain / out_of_scope 三档，不许硬判。"""
+
+    def test_certain_on_clean_sentence(self):
+        res = wanhua.solve("不是不该改")
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["certainty"], "certain")
+        self.assertEqual(res["polarity"], "肯定")
+
+    def test_uncertain_keeps_polarity_but_flags(self):
+        res = wanhua.solve("差点没赶上")
+        self.assertEqual(res["status"], "ambiguous")
+        self.assertEqual(res["certainty"], "uncertain")
+        self.assertTrue(res["rules"])
+
+    def test_rhetorical_is_out_of_scope_not_guessed(self):
+        res = wanhua.solve("难道这不叫负责吗？")
+        self.assertEqual(res["status"], "out_of_scope")
+        self.assertEqual(res["certainty"], "out_of_scope")
+        self.assertIsNone(res["polarity"])
+        self.assertIsNone(res["confidence"])
+        self.assertIn("人工复核", res["next_step"])
+
+    def test_unknown_without_pragmatic_stays_unknown(self):
+        res = wanhua.solve("会议改到下周了")
+        self.assertEqual(res["status"], "unknown")
+        self.assertIsNone(res["polarity"])
+
+    def test_out_of_scope_exit_three(self):
+        code, out, _ = run_cli(["solve", "难道这不叫负责吗？"])
+        self.assertEqual(code, wanhua.EXIT_NEEDS_CONTEXT)
+        self.assertEqual(json.loads(out)["status"], "out_of_scope")
+
+
+class RuleProvenanceTests(unittest.TestCase):
+    """可解释：命中的规则、规则冲突、规则库版本都要暴露出来。"""
+
+    def test_check_exposes_matched_rules(self):
+        res = wanhua.check("不是不该改")
+        self.assertIn("matched_rules", res)
+        self.assertIn("conflicts", res)
+        self.assertEqual(res["certainty"], "certain")
+
+    def test_conflict_detected(self):
+        res = wanhua.check("差点没让人难免不生气")
+        self.assertEqual(len(res["conflicts"]), 1)
+        self.assertEqual(sorted(res["conflicts"][0]["rules"]), ["R-LEXICAL", "R-SPECIAL"])
+        self.assertFalse(res["pass"])
+
+    def test_rules_version_present(self):
+        res = wanhua.solve("不是不该改")
+        self.assertEqual(res["rules_version"], nc.RULES_VERSION)
+        self.assertEqual(res["version"], wanhua.__version__)
 
 
 if __name__ == "__main__":
