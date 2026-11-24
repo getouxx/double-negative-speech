@@ -254,7 +254,8 @@ def main(argv: list[str]) -> int:
     elif cmd == "compare" and len(rest) >= 2:
         print(json.dumps(compare(rest[0], rest[1]), ensure_ascii=False, indent=2))
     elif cmd == "check" and rest:
-        print(json.dumps(check(" ".join(rest)), ensure_ascii=False, indent=2))
+        result = check(" ".join(rest))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif cmd == "templates":
         for pat, meaning in TEMPLATES:
             print(f"{pat}\t→ {meaning}")

@@ -9,7 +9,7 @@
 指标定义：
     极性准确率 = polarity 与标注一致的条数 / 标注了 polarity 的条数
     状态准确率 = status 与标注一致的条数 / 全部条数
-    这里比的是【字面极性折叠】，语用态度另由 pragmatic 层提示，不参与计分。
+    这里比的是【语义极性】（人判），语用态度另由 pragmatic 层提示，不参与计分。
 """
 from __future__ import annotations
 

@@ -17,7 +17,7 @@
 
 - 新增 `tests/labeled_cases.json`（33 条语义标注）与 `scripts/evaluate.py`（极性/状态准确率 + 错例清单）。
 - 当前基线：极性 84.38%、状态 100%；已知漏判为词汇化否定（难免/不免）、特殊形式（差点没）、复杂辖域，全部如实留在错例里，不调标注迁就规则。
-- 测试 43 → 61 条，新增 `tests/test_contract.py`（13 条契约）与 `tests/test_accuracy.py`（3 条指标）。
+- 测试 43 → 61 条，新增 `tests/test_contract.py`（15 条契约）与 `tests/test_accuracy.py`（3 条指标）。
 
 **文档**
 
